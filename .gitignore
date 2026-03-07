@@ -1,0 +1,9 @@
+node_modules/
+frontend/node_modules/
+data/
+saved_models/
+.venv/
+__pycache__/
+*.h5
+*.pt
+*.zip

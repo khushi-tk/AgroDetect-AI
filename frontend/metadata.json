@@ -1,0 +1,7 @@
+{
+  "name": "AgroDetect AI",
+  "description": "Advanced crop disease detection platform using Gemini AI vision and reasoning for precision agriculture.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
