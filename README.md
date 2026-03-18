@@ -29,7 +29,7 @@ Interactive UI
    Modern frontend built with React + TypeScript + Vite
 
 System Architecture
-
+```
 User
   │
   │ Upload Image / Ask Question
@@ -72,7 +72,8 @@ AgroDetect/
 ├── saved_models/
 │   └── plant_disease_model.h5
 │
-└── predict.py                # Standalone prediction script
+└── predict.py              # Standalone prediction script
+```
  Machine Learning Model
 
 The disease classification model is built using TensorFlow / Keras.
