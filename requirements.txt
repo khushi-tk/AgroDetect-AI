@@ -12,9 +12,10 @@ pillow==12.1.1
 h5py==3.15.1
 
 # LLM
-google-genai==1.64.0 
+google-genai==1.64.0       
 
 # Utilities
 python-dotenv==1.2.1
 pydantic==2.12.5
 requests==2.32.5
+huggingface_hub
