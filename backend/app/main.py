@@ -1,25 +1,56 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-import tensorflow as tf
+from pathlib import Path
 import numpy as np
 from PIL import Image
+import tensorflow as tf
+from google import genai
 import io
 import os
 
-BASE_DIR   = "/home/khushi/AgroDetect"
-MODEL_PATH = "/home/khushi/AgroDetect/saved_models/plant_disease_model.h5"
-DATA_PATH  = "/home/khushi/AgroDetect/data/PlantVillage"
+# Setup paths
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+MODEL_DIR = BASE_DIR / "saved_models"
+MODEL_PATH = MODEL_DIR / "plant_disease_model.h5"
+CLASSES_PATH = BASE_DIR / "backend" / "app" / "classes.txt"
 
-from google import genai
-
+# Load environment variables
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY not found in backend/.env")
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# HF_REPO_ID = os.getenv("HF_REPO_ID", "Khushi-tk/agrodetect")
+# HF_TOKEN = os.getenv("HF_TOKEN")
+
+if not GEMINI_API_KEY:
+    raise RuntimeError("GEMINI_API_KEY not found in environment variables")
+
+# Gemini client
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
+# Ensure model directory exists
+MODEL_DIR.mkdir(exist_ok=True)
+
+# Uncomment when ready to enable HuggingFace download:
+# if not MODEL_PATH.exists():
+#     print("⬇ Downloading model from HuggingFace...")
+#     from huggingface_hub import hf_hub_download
+#     hf_hub_download(
+#         repo_id=HF_REPO_ID,
+#         filename="plant_disease_model.h5",
+#         local_dir=str(MODEL_DIR),
+#         token=HF_TOKEN
+#     )
+
+# Load classes
+if CLASSES_PATH.exists():
+    with open(CLASSES_PATH, "r") as f:
+        class_names = [line.strip() for line in f if line.strip()]
+else:
+    print("⚠ classes.txt not found, using fallback classes")
+    class_names = ["Healthy", "Early Blight", "Late Blight", "Leaf Spot"]
+
+# FastAPI app
 app = FastAPI(title="AgroDetect AI API")
 
 app.add_middleware(
@@ -30,31 +61,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Load model
 IMG_SIZE = 128
 
-try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    class_names = sorted(os.listdir(DATA_PATH))
-    print(f"✅ Model loaded. Classes: {len(class_names)}")
-except Exception as e:
-    print(f"⚠ Model loading failed: {e}")
+if not MODEL_PATH.exists():
+    print(f"❌ Model file not found at {MODEL_PATH}")
     model = None
-    class_names = ["Healthy", "Early Blight", "Late Blight", "Leaf Spot"]
+else:
+    try:
+        model = tf.keras.models.load_model(MODEL_PATH)
+        print(f"✅ Model loaded | Classes: {len(class_names)}")
+    except Exception as e:
+        print(f"❌ Model loading failed: {e}")
+        model = None
 
+
+# Prediction route
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     if model is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
+
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         image = image.resize((IMG_SIZE, IMG_SIZE))
+
         img_array = np.array(image) / 255.0
         img_array = np.expand_dims(img_array, axis=0)
+
         predictions = model.predict(img_array)
         idx = int(np.argmax(predictions))
         confidence = float(np.max(predictions))
         predicted_class = class_names[idx]
+
         return {
             "status": "success",
             "diagnosis": predicted_class,
@@ -62,9 +102,12 @@ async def predict(file: UploadFile = File(...)):
             "etiology": "Fungal or bacterial pathogen influenced by humidity and temperature.",
             "recommendation": "Apply appropriate fungicide and improve field ventilation."
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Chat route (Gemini + fallback)
 @app.post("/chat")
 async def chat(payload: dict):
     user_message = payload.get("message")
@@ -72,8 +115,8 @@ async def chat(payload: dict):
         raise HTTPException(status_code=400, detail="Message is required")
 
     prompt = f"""
-You are an AI Agronomist specialising in tomato and potato crop diseases, especially late blight caused by Phytophthora infestans.
-Provide clear, practical, farmer-friendly advice. Be specific about fungicide names, dosages, and timing.
+You are an AI Agronomist specialising in tomato and potato crop diseases.
+Provide clear, practical, farmer-friendly advice.
 
 Farmer question:
 {user_message}
@@ -88,133 +131,38 @@ Farmer question:
 
     except Exception as e:
         print(f"⚠ Gemini failed: {e}")
+
         msg = user_message.lower()
-
-        # ===== TOMATO LATE BLIGHT (primary focus) =====
-        if "late blight" in msg or "phytophthora" in msg:
-            reply = """Late blight (Phytophthora infestans) is the most destructive tomato and potato disease.
-
-🔍 Identification:
-• Dark water-soaked lesions on leaves, often with white mould on underside
-• Brown lesions on stems, fruits turn dark brown and rot rapidly
-• Spreads field-wide within 48–72 hours in cool, wet weather (15–20°C)
-
-🌿 Organic Treatment:
-• Apply Bordeaux mixture (copper sulfate + lime) immediately
-• Remove and destroy ALL infected material — do not compost
-• Switch to drip irrigation — keep foliage completely dry
-• Spray copper hydroxide every 5–7 days during wet weather
-
-⚗️ Chemical Treatment:
-• Mancozeb 75% WP at 2.5g/L — protectant, spray preventively
-• Cymoxanil + Mancozeb (Curzate M) — curative within 48h of infection
-• Metalaxyl-M (Ridomil Gold) — systemic, use when blight is spreading
-• Fluopicolide (Infinito) — best for resistant strains
-
-⚠️ Critical Actions:
-• Act within 24 hours of first symptom — delay causes total crop loss
-• Rotate fungicide modes of action to prevent resistance
-• Spray in the morning so leaves dry before evening"""
-
-        # ===== EARLY BLIGHT =====
-        elif "early blight" in msg or "alternaria" in msg:
-            reply = """Early blight (Alternaria solani) typically affects older, stressed tomato plants.
-
-🔍 Identification:
-• Concentric ring (target-like) lesions on older leaves first
-• Yellow halo surrounding brown spots
-• Progresses upward from the base of the plant
-
-🌿 Organic Treatment:
-• Remove all affected lower leaves immediately
-• Neem oil spray at 5ml/L every 7 days
-• Baking soda solution (1 tsp per litre) as foliar spray
-• Mulch around base to prevent soil splash
-
-⚗️ Chemical Treatment:
-• Copper oxychloride 50% WP at 3g/L
-• Mancozeb 75% WP at 2g/L
-• Azoxystrobin (Amistar) for systemic control
-
-🛡️ Prevention:
-• Stake plants to keep foliage off ground
-• Water at base only — never wet leaves
-• 2–3 year rotation away from Solanaceae crops"""
-
-        # ===== TREATMENT / FUNGICIDE QUESTIONS =====
-        elif any(w in msg for w in ["treatment", "fungicide", "spray", "apply", "cure", "control"]):
-            reply = """General disease management for tomato crops:
-
-⚗️ Recommended Fungicides:
-• Mancozeb 75% WP (2–2.5g/L) — broad-spectrum protectant
-• Copper hydroxide — effective for both fungal and bacterial diseases
-• Cymoxanil + Mancozeb — curative action within 48 hours
-• Azoxystrobin (Amistar) — systemic, long-lasting protection
-
-📋 Application Guidelines:
-• Spray early morning for best absorption and to allow drying
-• Repeat every 7 days, or every 5 days in wet weather
-• Always cover both upper and lower leaf surfaces
-• Rotate between fungicide groups to prevent resistance
-
-🌿 Organic Options:
-• Bordeaux mixture — preventive copper-based spray
-• Neem oil (5ml/L) — broad-spectrum, safe for beneficial insects
-• Trichoderma-based biocontrol for soil-borne diseases"""
-
-        # ===== PREVENTION =====
-        elif any(w in msg for w in ["prevent", "avoid", "protect", "stop"]):
-            reply = """Disease prevention strategy for tomato and potato crops:
-
-🌱 Before Planting:
-• Use certified disease-free or resistant varieties
-• Treat seeds with Thiram or Captan fungicide
-• Prepare raised beds with well-drained soil
-• Test soil pH — aim for 6.0–6.8 for tomatoes
-
-🌿 During the Season:
-• Maintain wide plant spacing (45–60cm) for airflow
-• Use drip irrigation — wet foliage invites infection
-• Apply preventive copper spray before wet weather forecasts
-• Scout fields twice weekly during high-risk periods
-
-🔄 After Harvest:
-• Remove and destroy all crop residue
-• Deep plough to bury disease inoculum
-• Rotate with cereals or legumes for 2–3 years
-• Never compost diseased plant material"""
-
-        # ===== GENERAL / DEFAULT =====
+        if "late blight" in msg:
+            reply = "Late blight detected. Use Mancozeb or Metalaxyl immediately and avoid wet foliage."
+        elif "early blight" in msg:
+            reply = "Early blight detected. Remove affected leaves and apply copper fungicide."
         else:
-            reply = """As an AI Agronomist, here is key advice for healthy tomato crops:
-
-🔍 Most Common Diseases to Watch:
-• Late blight (Phytophthora infestans) — most destructive, acts fast
-• Early blight (Alternaria solani) — affects older leaves first
-• Bacterial spot (Xanthomonas) — water-soaked lesions in wet weather
-• Leaf mould — grey/brown patches in humid greenhouse conditions
-
-📅 Weekly Management Checklist:
-• Inspect lower leaves for early signs of blight or spots
-• Check weather forecast — apply fungicide before rain
-• Ensure drip irrigation is working — avoid wetting foliage
-• Remove any yellowing or infected leaves promptly
-
-⚗️ Preventive Spray Schedule:
-• Mancozeb every 10–14 days as standard protection
-• Switch to systemic fungicide (Amistar/Ridomil) at first sign of disease
-• Copper-based spray after heavy rain
-
-Ask me about a specific disease for detailed treatment advice."""
+            reply = "Ensure proper irrigation, spacing, and preventive fungicide use."
 
         return {"status": "fallback", "reply": reply}
 
+
+# Health check
 @app.get("/health")
 def health():
     return {
         "status": "AgroDetect API running",
         "model_loaded": model is not None,
-        "model_path": MODEL_PATH,
-        "data_path": DATA_PATH,
-        "classes_found": len(class_names)
+        "model_path": str(MODEL_PATH),
+        "classes_count": len(class_names)
+    }
+
+
+# Debug route
+@app.get("/debug/model-info")
+def model_info():
+    if model is None:
+        return {"error": "Model not loaded"}
+
+    return {
+        "input_shape": model.input_shape,
+        "output_shape": model.output_shape,
+        "classes_count": len(class_names),
+        "class_names": class_names
     }

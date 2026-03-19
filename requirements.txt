@@ -1,0 +1,20 @@
+# API server
+fastapi==0.129.0
+uvicorn==0.41.0
+python-multipart==0.0.22
+starlette==0.52.1
+
+# ML inference
+tensorflow==2.20.0
+keras==3.13.2
+numpy==2.4.2
+pillow==12.1.1
+h5py==3.15.1
+
+# LLM
+google-genai==1.64.0 
+
+# Utilities
+python-dotenv==1.2.1
+pydantic==2.12.5
+requests==2.32.5
