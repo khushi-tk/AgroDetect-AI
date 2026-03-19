@@ -13,7 +13,7 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 MODEL_DIR = BASE_DIR / "saved_models"
 MODEL_PATH = MODEL_DIR / "plant_disease_model.h5"
-CLASSES_PATH = BASE_DIR / "backend" / "app" / "classes.txt"
+CLASSES_PATH = BASE_DIR / "classes.txt"
 
 # Load environment variables
 load_dotenv()
